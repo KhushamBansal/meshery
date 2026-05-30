@@ -27,7 +27,7 @@ export { ArrowDropDownIcon } from './ArrowDropDownIcon';
 export { EditIcon } from './EditIcon';
 export { FullscreenExitIcon } from './FullscreenExitIcon';
 export { FullscreenIcon } from './FullscreenIcon';
-export { GetAppIcon } from './GetAppIcon';
+export { GetAppIcon } from '@sistent/sistent';
 export { LockIcon } from './LockIcon';
 export { SaveIcon } from './SaveIcon';
 export { SettingsIcon } from './SettingsIcon';
