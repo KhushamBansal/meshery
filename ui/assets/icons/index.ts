@@ -23,7 +23,6 @@ export type { IconProps } from './types';
 // Typed SVG icons (Phase 2 #18730).
 // ---------------------------------------------------------------------------
 
-export { ArrowDropDownIcon } from './ArrowDropDownIcon';
 export { EditIcon } from './EditIcon';
 export { FullscreenExitIcon } from './FullscreenExitIcon';
 export { FullscreenIcon } from './FullscreenIcon';
@@ -54,6 +53,8 @@ export {
   AccessTimeIcon,
   AddCircleIcon as AddCircle,
   ArrowBackIcon as ArrowBack,
+  ArrowDropDownIcon,
+  ArrowDropDownIcon as ArrowDropDown,
   BarChartIcon as BarChart,
   BuildRoundedIcon as BuildRounded,
   CachedIcon as Cached,
@@ -105,7 +106,7 @@ export {
 } from '@sistent/sistent';
 
 export { default as AddCircleOutlined } from './AddIconCircleBorder';
-export { ArrowDropDownIcon as ArrowDropDown } from './ArrowDropDownIcon';
+
 export { default as Delete } from './DeleteIcon';
 export { default as DeleteForever } from './DeleteIcon';
 export { default as FilterAlt } from './ContentFilterIcon';
