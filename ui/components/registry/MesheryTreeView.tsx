@@ -375,6 +375,7 @@ const MesheryTreeView = React.memo(
               selected={selected}
               setShowDetailsData={setShowDetailsData}
               showDetailsData={showDetailsData}
+              searchText={searchText}
               lastRegistrantRef={lastItemRef[REGISTRANTS]}
               isRegistrantFetching={isFetching[REGISTRANTS]}
             />,
@@ -410,6 +411,7 @@ const MesheryTreeView = React.memo(
               setShowDetailsData={setShowDetailsData}
               lastRegistrantRef={lastItemRef[RELATIONSHIPS]}
               isRelationshipFetching={isFetching[RELATIONSHIPS]}
+              searchText={searchText}
             />,
             RELATIONSHIPS,
             isLoading[view],

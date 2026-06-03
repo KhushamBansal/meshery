@@ -18,7 +18,9 @@ type RelationshipTreeProps = {
   idForKindAsProp?: string;
   lastRegistrantRef?: React.MutableRefObject<any>;
   isRelationshipFetching?: boolean;
+  searchText?: string | null;
 };
+import React, { useEffect, useMemo } from 'react';
 
 const RelationshipTree = ({
   expanded,
@@ -31,7 +33,50 @@ const RelationshipTree = ({
   idForKindAsProp,
   lastRegistrantRef,
   isRelationshipFetching,
+  searchText = null,
 }: RelationshipTreeProps) => {
+  // Auto-expand parents when search finds nested items
+  useEffect(() => {
+    if (searchText) {
+      const nodesToExpand: string[] = [];
+      data.forEach((relationshipByKind, index) => {
+        const idForKind =
+          view === RELATIONSHIPS
+            ? `${relationshipByKind.relationships[0].id}`
+            : `${idForKindAsProp}.${relationshipByKind.relationships[0].id}`;
+
+        // Check if any nested items match the search
+        const hasMatch = relationshipByKind.relationships.some((relationship: any) => {
+          const itemText = `${relationship.subType} ${relationship.model.name}`.toLowerCase();
+          return itemText.includes(searchText.toLowerCase());
+        });
+
+        if (hasMatch) {
+          nodesToExpand.push(idForKind);
+        }
+      });
+
+      // Only update if there are changes to expand
+      if (nodesToExpand.length > 0) {
+        handleToggle(null, [...expanded, ...nodesToExpand.filter((id) => !expanded.includes(id))]);
+      }
+    }
+  }, [searchText, data, view, idForKindAsProp, expanded, handleToggle]);
+
+  // Filter relationships based on search text
+  const filteredData = useMemo(() => {
+    if (!searchText) return data;
+
+    return data
+      .map((relationshipByKind) => ({
+        ...relationshipByKind,
+        relationships: relationshipByKind.relationships.filter((relationship: any) => {
+          const itemText = `${relationship.subType} ${relationship.model.name}`.toLowerCase();
+          return itemText.includes(searchText.toLowerCase());
+        }),
+      }))
+      .filter((relationshipByKind) => relationshipByKind.relationships.length > 0);
+  }, [data, searchText]);
   return (
     <SimpleTreeView
       aria-label="controlled"
@@ -42,7 +87,7 @@ const RelationshipTree = ({
       expandedItems={expanded}
       selectedItems={selected}
     >
-      {data.map((relationshipByKind, index) => {
+      {filteredData.map((relationshipByKind, index) => {
         const idForKind =
           view === RELATIONSHIPS
             ? `${relationshipByKind.relationships[0].id}`

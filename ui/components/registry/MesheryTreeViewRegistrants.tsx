@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { SimpleTreeView } from '../shared/TreeView';
 import { CircularProgress } from '@sistent/sistent';
 import { REGISTRANTS } from '@/constants/navigator';
@@ -19,6 +19,7 @@ type MesheryTreeViewRegistrantsProps = {
   lastRegistrantRef: React.MutableRefObject<any>;
   isRegistrantFetching: boolean;
   showDetailsData: { type: string; data: any };
+  searchText: string | null;
 };
 
 const MesheryTreeViewRegistrants = ({
@@ -32,7 +33,36 @@ const MesheryTreeViewRegistrants = ({
   lastRegistrantRef,
   isRegistrantFetching,
   showDetailsData,
+  searchText,
 }: MesheryTreeViewRegistrantsProps) => {
+  const filteredData = useMemo(() => {
+    if (!searchText) {
+      return data;
+    }
+
+    const normalizedSearchText = searchText.toLowerCase();
+
+    return data
+      .map((registrant) => {
+        const models = (registrant.models || []).filter((model) => {
+          const modelText = `${model?.name || ''} ${model?.registrant?.kind || ''}`.toLowerCase();
+          return modelText.includes(normalizedSearchText);
+        });
+
+        return {
+          ...registrant,
+          models,
+        };
+      })
+      .filter((registrant) => {
+        const registrantText = `${registrant?.name || ''} ${registrant?.kind || ''}`.toLowerCase();
+        return (
+          registrantText.includes(normalizedSearchText) ||
+          (registrant.models && registrant.models.length > 0)
+        );
+      });
+  }, [data, searchText]);
+
   return (
     <SimpleTreeView
       aria-label="controlled"
@@ -43,7 +73,7 @@ const MesheryTreeViewRegistrants = ({
       expandedItems={expanded}
       selectedItems={selected}
     >
-      {data
+      {filteredData
         ?.filter((item) => item?.summary || item?.models)
         ?.map((registrant) => (
           <StyledTreeItem

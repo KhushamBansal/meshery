@@ -47,6 +47,7 @@ describe('MesheryTreeViewRegistrants', () => {
     lastRegistrantRef: { current: null } as React.MutableRefObject<any>,
     isRegistrantFetching: false,
     showDetailsData: { type: '', data: {} },
+    searchText: null,
   };
 
   const sampleData = [
@@ -131,5 +132,32 @@ describe('MesheryTreeViewRegistrants', () => {
     const data = [undefined as any, null as any];
     render(<MesheryTreeViewRegistrants {...baseProps} data={data} />);
     expect(screen.getByTestId('tree-view')).toBeInTheDocument();
+  });
+
+  it('filters registrants by searchText on registrant name and nested model names', () => {
+    const data = [
+      {
+        id: 'reg-1',
+        name: 'Github',
+        kind: 'github',
+        summary: { models: 1 },
+        models: [
+          { id: 'm1', name: 'kube-model', registrant: { kind: 'github' } },
+          { id: 'm2', name: 'other-model', registrant: { kind: 'github' } },
+        ],
+      },
+      {
+        id: 'reg-2',
+        name: 'Artifact Hub',
+        kind: 'artifact',
+        summary: { models: 1 },
+        models: [{ id: 'm3', name: 'artifact-model', registrant: { kind: 'artifact' } }],
+      },
+    ];
+
+    render(<MesheryTreeViewRegistrants {...baseProps} data={data} searchText="kube" />);
+
+    expect(screen.getByTestId('styled-tree-item-reg-1')).toBeInTheDocument();
+    expect(screen.queryByTestId('styled-tree-item-reg-2')).not.toBeInTheDocument();
   });
 });

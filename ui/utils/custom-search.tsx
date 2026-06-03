@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
   CustomTooltip,
   styled,
@@ -56,12 +56,28 @@ const SearchBar = ({
   expanded,
   setExpanded,
   value = '',
-  setModelsFilters,
+  setModelsFilters = () => {},
 }) => {
   const [searchText, setSearchText] = useState(value);
   const searchRef = useRef(null);
 
-  const debouncedOnSearch = debounce(onSearch, 500);
+  const onSearchRef = useRef(onSearch);
+  useEffect(() => {
+    onSearchRef.current = onSearch;
+  }, [onSearch]);
+
+  useEffect(() => {
+    setSearchText(value || '');
+  }, [value]);
+
+  const debouncedOnSearch = useCallback(
+    debounce((val) => {
+      if (onSearchRef.current) {
+        onSearchRef.current(val);
+      }
+    }, 500),
+    [],
+  );
 
   const handleSearchChange = (event) => {
     debouncedOnSearch(event.target.value);
@@ -71,13 +87,15 @@ const SearchBar = ({
   const handleClearIconClick = () => {
     setModelsFilters({ page: 0 });
     setSearchText('');
-    debouncedOnSearch('');
+    debouncedOnSearch(null);
     setExpanded(false);
   };
 
   const handleSearchIconClick = () => {
     if (expanded) {
+      setModelsFilters({ page: 0 });
       setSearchText('');
+      debouncedOnSearch(null);
       setExpanded(false);
     } else {
       setExpanded(true);
