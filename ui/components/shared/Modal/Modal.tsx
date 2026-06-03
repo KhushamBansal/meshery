@@ -99,8 +99,6 @@ export const Modal: FC<ModalProps> = ({
       title={title}
       headerIcon={headerIcon}
       maxWidth={sizeToMaxWidth[size]}
-      fullScreen={size === 'fullscreen'}
-      fullWidth
       isFullScreenModeAllowed={isFullScreenModeAllowed}
       className={className}
       {...ariaProps}
