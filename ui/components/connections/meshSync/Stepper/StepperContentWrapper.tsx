@@ -45,7 +45,19 @@ const StepperButton = styled(Button)(({ theme }) => ({
   },
 }));
 
-const StepperContent = ({
+interface StepperContentProps {
+  title: string;
+  children?: React.ReactNode;
+  subtitle?: string;
+  tips?: string;
+  btnText?: string;
+  cancel?: boolean;
+  handleCallback?: () => void;
+  cancelCallback?: () => void;
+  disabled?: boolean;
+}
+
+const StepperContent: React.FC<StepperContentProps> = ({
   title,
   children,
   subtitle,

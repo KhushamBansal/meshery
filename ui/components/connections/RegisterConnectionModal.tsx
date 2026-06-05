@@ -6,7 +6,7 @@
  * around cancelling an in-flight registration and clearing the underlying
  * MeshSync resource on completion are preserved from the legacy module.
  */
-import { FC, useState } from 'react';
+import React, { FC, useState } from 'react';
 import { Modal } from '@/components/shared/Modal';
 import { useCancelConnectionRegisterMutation } from '@/rtk-query/connection';
 import { useDeleteMeshsyncResourceMutation } from '@/rtk-query/meshsync';
@@ -39,28 +39,36 @@ const RegisterConnectionModal: FC<RegisterConnectionModalProps> = ({
   const [cancelConnection] = useCancelConnectionRegisterMutation();
   const [deleteMeshsyncResource] = useDeleteMeshsyncResourceMutation();
 
-  const cancelConnectionRegister = (id?: string) => {
-    if (!id) return;
-    cancelConnection({ body: { id } })
-      .unwrap()
-      .then(() => {
-        notify({
-          message: 'Connection registration cancelled.',
-          event_type: EVENT_TYPES.INFO,
-        });
-      })
-      .catch((error) => {
-        notify({
-          message: `Failed to cancel registration: ${getErrorMessage(error)}`,
-          event_type: EVENT_TYPES.ERROR,
-        });
-      });
-  };
+  const sharedDataRef = React.useRef<SharedData | null>(null);
+  React.useEffect(() => {
+    sharedDataRef.current = sharedData;
+  }, [sharedData]);
 
-  const handleClose = () => {
+  const cancelConnectionRegister = React.useCallback(
+    (id?: string) => {
+      if (!id) return;
+      cancelConnection({ body: { id } })
+        .unwrap()
+        .then(() => {
+          notify({
+            message: 'Connection registration cancelled.',
+            event_type: EVENT_TYPES.INFO,
+          });
+        })
+        .catch((error) => {
+          notify({
+            message: `Failed to cancel registration: ${getErrorMessage(error)}`,
+            event_type: EVENT_TYPES.ERROR,
+          });
+        });
+    },
+    [cancelConnection, notify],
+  );
+
+  const handleClose = React.useCallback(() => {
     handleRegistrationModalClose();
-    cancelConnectionRegister(sharedData?.connection?.id);
-  };
+    cancelConnectionRegister(sharedDataRef.current?.connection?.id);
+  }, [handleRegistrationModalClose, cancelConnectionRegister]);
 
   const handleRegistrationComplete = (resourceId?: string) => {
     const resolvedResourceId = resourceId ?? connectionData.resourceID;

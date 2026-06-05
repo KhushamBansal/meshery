@@ -25,22 +25,52 @@ import Notification from './Notification';
 import {
   useConnectToConnectionMutation,
   useVerifyAndRegisterConnectionMutation,
+  useAddKubernetesConfigMutation,
 } from '@/rtk-query/connection';
 import { useGetCredentialsQuery } from '@/rtk-query/credentials';
+import { useGetComponentsQuery } from '@/rtk-query/meshModel';
+import { CloudUploadIcon, FormGroup, TextField, InputAdornment } from '@sistent/sistent';
+import { updateProgress } from '@/store/slices/mesheryUi';
+import { EVENT_TYPES } from 'lib/event-types';
+import { useNotification } from '@/utils/hooks/useNotification';
 
-const CONNECTION_TYPES = ['Prometheus Connection', 'Grafana Connection'];
-
-const schema = selectCompSchema(
-  CONNECTION_TYPES,
-  'Select one of the available Connection type',
-  'Select type of Connection to register',
-  'selectedConnectionType',
-);
 export const SelectConnection = ({ setSharedData, handleNext }) => {
   const formRef = useRef();
   const [registerConnection] = useVerifyAndRegisterConnectionMutation();
+  const { data: componentsData } = useGetComponentsQuery({ search: 'Connection', pagesize: 'all' });
+
+  const connectionTypes = React.useMemo(() => {
+    if (!componentsData?.components) return ['Kubernetes Connection'];
+    const types = componentsData.components
+      .filter((c) => c.component.kind.endsWith('Connection') && c.component.kind !== 'Connection')
+      // Insert a space before the trailing 'Connection' suffix for display.
+      // e.g. 'PrometheusConnection' -> 'Prometheus Connection'
+      .map((c) => c.component.kind.replace(/Connection$/, ' Connection').trim());
+
+    if (!types.includes('Kubernetes Connection')) {
+      types.push('Kubernetes Connection');
+    }
+    return Array.from(new Set(types)).sort();
+  }, [componentsData]);
+
+  const schema = React.useMemo(() => {
+    return selectCompSchema(
+      connectionTypes,
+      'Select one of the available Connection type',
+      'Select type of Connection to register',
+      'selectedConnectionType',
+    );
+  }, [connectionTypes]);
 
   const handleRegisterConnection = async (componentName) => {
+    if (componentName.toLowerCase() === 'kubernetes') {
+      setSharedData((prevState) => ({
+        ...prevState,
+        kind: 'kubernetes',
+      }));
+      handleNext();
+      return;
+    }
     try {
       const payload = {
         body: {
@@ -76,11 +106,10 @@ export const SelectConnection = ({ setSharedData, handleNext }) => {
   const handleChange = (data) => {
     if (data.selectedConnectionType) {
       const selectedConnectionType = data.selectedConnectionType;
-      // The selectedConnectionType is the concatentaion of connectionType, ' ' and 'Connection' suffix.
-      // Therefore, when initiating connection we are removing ' ' and suffix so that correct schema is retrieved.
-      handleRegisterConnection(
-        selectedConnectionType?.slice(0, selectedConnectionType.indexOf(' ')),
-      );
+      // Strip the ' Connection' suffix that was added for display to get the
+      // original kind name. e.g. 'Prometheus Connection' -> 'Prometheus'
+      const kindName = selectedConnectionType.replace(/ Connection$/, '').trim();
+      handleRegisterConnection(kindName);
     }
   };
 
@@ -97,10 +126,142 @@ export const SelectConnection = ({ setSharedData, handleNext }) => {
   );
 };
 
-export const ConnectionDetails = ({ sharedData, setSharedData, handleNext }) => {
+export const KubernetesConnectionDetails = ({
+  sharedData,
+  handleNext,
+  handleRegistrationComplete,
+}) => {
+  const { notify } = useNotification();
+  const [addK8sConfig] = useAddKubernetesConfigMutation();
+  const [formData, setFormData] = useState(new FormData());
+  const [fileName, setFileName] = useState('');
+
+  useEffect(() => {
+    ConnectionDetailContent.title = `Connecting to ${sharedData?.kind}`;
+  }, [sharedData?.kind]);
+
+  const cancelCallback = () => {
+    sharedData.onClose();
+  };
+
+  const handleChange = (e) => {
+    const field = e.target;
+    if (field.files.length < 1) return;
+    const name = field.files[0].name;
+    const fd = new FormData();
+    fd.append('k8sfile', field.files[0]);
+    setFormData(fd);
+    setFileName(name);
+  };
+
+  const handleCallback = async () => {
+    if (!formData.get('k8sfile')) {
+      notify({
+        message: 'Please select a valid kube config',
+        event_type: EVENT_TYPES.ERROR,
+      });
+      return;
+    }
+
+    const inputFileName = formData.get('k8sfile').name;
+    const invalidExtensions = /^.*\.(jpg|gif|jpeg|pdf|png|svg)$/i;
+
+    if (invalidExtensions.test(inputFileName)) {
+      notify({
+        message: 'Invalid file selected',
+        event_type: EVENT_TYPES.ERROR,
+      });
+      return;
+    }
+
+    try {
+      updateProgress({ showProgress: true });
+      const obj = await addK8sConfig({ body: formData }).unwrap();
+      updateProgress({ showProgress: false });
+
+      let hasError = false;
+      if (obj.errored_contexts && obj.errored_contexts.length > 0) {
+        for (let ctx of obj.errored_contexts) {
+          notify({
+            message: `Failed to add cluster "${ctx.name}" at ${ctx.server}`,
+            event_type: EVENT_TYPES.ERROR,
+            details: ctx.error.toString(),
+          });
+        }
+        hasError = true;
+      }
+
+      if (!hasError) {
+        notify({
+          message: `Kubernetes config ${inputFileName} uploaded successfully`,
+          event_type: EVENT_TYPES.SUCCESS,
+        });
+      }
+
+      // Kubernetes doesn't need the credential step
+      handleRegistrationComplete();
+      handleNext();
+    } catch (err) {
+      updateProgress({ showProgress: false });
+      notify({
+        message: `failed to upload kubernetes config: ${err}`,
+        event_type: EVENT_TYPES.ERROR,
+      });
+    }
+  };
+
+  return (
+    <StepperContent
+      {...ConnectionDetailContent}
+      handleCallback={handleCallback}
+      disabled={!fileName}
+      cancelCallback={cancelCallback}
+    >
+      <div style={{ overflow: 'hidden' }}>
+        <Typography variant="h6">Upload your kubeconfig</Typography>
+        <Typography variant="body2">commonly found at ~/.kube/config</Typography>
+        <FormGroup>
+          <input
+            id="k8sfile-stepper"
+            type="file"
+            onChange={handleChange}
+            style={{ display: 'none' }}
+          />
+          <TextField
+            id="k8sfileLabelText-stepper"
+            name="k8sfileLabelText"
+            style={{ cursor: 'pointer' }}
+            placeholder="Upload kubeconfig"
+            variant="outlined"
+            fullWidth
+            value={fileName}
+            onClick={() => {
+              document.querySelector('#k8sfile-stepper')?.click();
+            }}
+            margin="normal"
+            InputProps={{
+              readOnly: true,
+              endAdornment: (
+                <InputAdornment position="end">
+                  <CloudUploadIcon />
+                </InputAdornment>
+              ),
+            }}
+          />
+        </FormGroup>
+      </div>
+    </StepperContent>
+  );
+};
+
+export const ConnectionDetails = ({
+  sharedData,
+  setSharedData,
+  handleNext,
+  handleRegistrationComplete,
+}) => {
   const formRef = React.createRef();
   const [selectedEndpoint, setSelectedEndpoint] = useState(null);
-  // stores selected endpoint just before dropdown is closed
   const [prevSelectedEndpoint, setPrevSelectedEndpoint] = useState(null);
 
   useEffect(() => {
@@ -114,6 +275,16 @@ export const ConnectionDetails = ({ sharedData, setSharedData, handleNext }) => 
   const cancelCallback = () => {
     sharedData.onClose();
   };
+
+  if (sharedData?.kind === 'kubernetes') {
+    return (
+      <KubernetesConnectionDetails
+        sharedData={sharedData}
+        handleNext={handleNext}
+        handleRegistrationComplete={handleRegistrationComplete}
+      />
+    );
+  }
 
   const handleSelectEndpoint = (e) => {
     setSharedData((prevState) => ({
@@ -227,6 +398,9 @@ export const CredentialDetails = ({ sharedData, handleNext, handleRegistrationCo
 
   useEffect(() => {
     CredentialDetailContent.title = `Credential for ${sharedData?.kind}`;
+    if (sharedData?.kind === 'kubernetes') {
+      handleNext();
+    }
   }, [sharedData.kind]);
 
   const verifyConnection = async () => {
@@ -322,6 +496,8 @@ export const CredentialDetails = ({ sharedData, handleNext, handleRegistrationCo
     sharedData.onClose();
   };
 
+  const existingCredentials = credentialsData?.credentials || [];
+
   const handleSelectCredential = (e) => {
     const id = e.target.value;
     const credential = existingCredentials.find((credential) => credential.id === id);
@@ -348,7 +524,9 @@ export const CredentialDetails = ({ sharedData, handleNext, handleRegistrationCo
     }
   }, [selectedCredential, formState]);
 
-  const existingCredentials = credentialsData?.credentials || [];
+  if (sharedData?.kind === 'kubernetes') {
+    return null;
+  }
 
   return (
     <StepperContent

@@ -60,7 +60,7 @@ const StepList = styled('ul')(({ theme }) => ({
   },
 }));
 
-const MeshSyncEmptyState = () => {
+const MeshSyncEmptyState = ({ onOpenRegistrationModal }) => {
   const [infoModalOpen, setInfoModalOpen] = useState(false);
   const theme = useTheme();
   const router = useRouter();
@@ -74,7 +74,11 @@ const MeshSyncEmptyState = () => {
   };
 
   const handleGoToConnections = () => {
-    router.push('/management/connections');
+    if (onOpenRegistrationModal) {
+      onOpenRegistrationModal();
+    } else {
+      router.push('/management/connections');
+    }
     setInfoModalOpen(false);
   };
 
@@ -162,10 +166,10 @@ const MeshSyncEmptyState = () => {
         </ModalBody>
         <ModalFooter
           helpText={
-            'Connect a Kubernetes cluster to populate MeshSync data and start managing your infrastructure with Meshery.\n[Learn more](https://docs.meshery.io/installation/kubernetes) about Kubernetes installation.'
+            'Create a Connection to populate MeshSync data and start managing your infrastructure with Meshery.\n[Learn more](https://docs.meshery.io/installation/kubernetes) about Kubernetes installation.'
           }
         >
-          <ModalButtonPrimary onClick={handleGoToConnections}>Add Cluster</ModalButtonPrimary>
+          <ModalButtonPrimary onClick={handleGoToConnections}>Create Connection</ModalButtonPrimary>
         </ModalFooter>
       </Modal>
     </>

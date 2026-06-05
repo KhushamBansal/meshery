@@ -52,7 +52,7 @@ function RJSFWrapper(props) {
   }, [schema]);
 
   return (
-    <RJSFWrapperComponent {...props}>
+    <RJSFWrapperComponent>
       <RJSFForm
         isLoading={isLoading}
         schema={schema}

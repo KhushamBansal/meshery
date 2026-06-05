@@ -724,7 +724,7 @@ export default function MeshSyncTable(props) {
       </ToolWrapper>
 
       {!meshSyncResources || meshSyncResources.length === 0 ? (
-        <MeshSyncEmptyState />
+        <MeshSyncEmptyState onOpenRegistrationModal={() => setRegistrationModal(true)} />
       ) : (
         <ResponsiveDataTable
           data={meshSyncResources}
