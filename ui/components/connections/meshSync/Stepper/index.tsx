@@ -111,19 +111,6 @@ export default function CustomizedSteppers({
     });
   }, [connectionData]);
 
-  React.useEffect(() => {
-    setSharedData((prevState) => ({
-      ...prevState,
-      onClose: onClose,
-    }));
-    // Depend on `onClose` (the actual input we mirror into shared state) and
-    // `setSharedData` (a stable functional setter). Previously this effect
-    // listed `sharedData` in its deps and called `setSharedData(prev => ...)`
-    // — a guaranteed self-feeding loop: every commit replaced `sharedData`
-    // with a new object reference, which retriggered the effect, which
-    // produced another new reference, etc.
-  }, [onClose, setSharedData]);
-
   const ActiveStepContent = stepContent[String(activeStep + 1)].component;
 
   const handleNext = () => {
@@ -135,6 +122,7 @@ export default function CustomizedSteppers({
     sharedData,
     setSharedData,
     handleRegistrationComplete,
+    onClose,
   };
 
   const stepProps = stepContent[String(activeStep + 1)]?.props?.reduce((props, propName) => {

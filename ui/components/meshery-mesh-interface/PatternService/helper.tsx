@@ -284,26 +284,28 @@ function recursivelyParseJsonAndCheckForNonRJSFCompliantFields(jsonSchema) {
     jsonSchema.type = rjsfFieldType; // Mutating original object by adding a valid type field
   }
 
-  // handle allOf
-  if (Object.prototype.hasOwnProperty.call(jsonSchema, 'allOf')) {
-    jsonSchema.allOf.forEach((item) => {
-      recursivelyParseJsonAndCheckForNonRJSFCompliantFields(item);
-    });
-  }
+  // 2. K8S CRD Validation Fix
+  // Kubernetes uses oneOf/anyOf/allOf for cross-field validation (e.g., mutually exclusive fields).
+  // These blocks often lack a 'type', causing RJSF to crash with "Unknown field type undefined".
+  // If a schema already has "properties", strip these validation arrays and let the backend validate.
+  ['allOf', 'oneOf', 'anyOf'].forEach((key) => {
+    if (Object.prototype.hasOwnProperty.call(jsonSchema, key)) {
+      // A purely validation-based item has no 'type' and no 'properties', but uses 'not' or 'required'
+      const isPureValidation = jsonSchema[key].some(
+        (item) => !item.type && !item.properties && (item.not || item.required),
+      );
 
-  // handle oneOf
-  if (Object.prototype.hasOwnProperty.call(jsonSchema, 'oneOf')) {
-    jsonSchema.oneOf.forEach((item) => {
-      recursivelyParseJsonAndCheckForNonRJSFCompliantFields(item);
-    });
-  }
-
-  // handle anyof
-  if (Object.prototype.hasOwnProperty.call(jsonSchema, 'anyOf')) {
-    jsonSchema.anyOf.forEach((item) => {
-      recursivelyParseJsonAndCheckForNonRJSFCompliantFields(item);
-    });
-  }
+      if (jsonSchema.type === 'object' && jsonSchema.properties && isPureValidation) {
+        // Strip the validation block so RJSF doesn't crash trying to render it
+        delete jsonSchema[key];
+      } else {
+        // Otherwise recurse into the items normally (e.g., real polymorphic oneOf)
+        jsonSchema[key].forEach((item) => {
+          recursivelyParseJsonAndCheckForNonRJSFCompliantFields(item);
+        });
+      }
+    }
+  });
 
   if (jsonSchema.type === 'object' && jsonSchema.additionalProperties) {
     recursivelyParseJsonAndCheckForNonRJSFCompliantFields(jsonSchema.additionalProperties);

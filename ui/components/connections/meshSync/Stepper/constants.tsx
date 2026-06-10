@@ -24,15 +24,15 @@ export const registerConnectionContent = {
   },
   2: {
     component: <ConnectionDetails />,
-    props: ['handleNext', 'sharedData', 'setSharedData'],
+    props: ['handleNext', 'sharedData', 'setSharedData', 'onClose'],
   },
   3: {
     component: <CredentialDetails />,
-    props: ['handleNext', 'sharedData', 'setSharedData', 'handleRegistrationComplete'],
+    props: ['handleNext', 'sharedData', 'setSharedData', 'handleRegistrationComplete', 'onClose'],
   },
   4: {
     component: <Finish />,
-    props: ['sharedData', 'setSharedData'],
+    props: ['sharedData', 'setSharedData', 'onClose'],
   },
 };
 

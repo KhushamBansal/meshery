@@ -183,6 +183,11 @@ const ObjectFieldTemplate = ({
   );
 
   const fieldTitle = uiSchema['ui:title'] || title;
+  const hideTitle = uiSchema['ui:options']?.hideTitle;
+
+  if (hideTitle) {
+    return <>{Properties}</>;
+  }
 
   return (
     <>

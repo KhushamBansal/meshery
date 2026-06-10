@@ -19,48 +19,83 @@ import {
 } from './constants';
 import StepperContent from './StepperContentWrapper';
 import RJSFWrapper from '../../../meshery-mesh-interface/PatternService/RJSF_wrapper';
+import ConnectionWizardArrayFieldTemplate from './ConnectionWizardArrayFieldTemplate';
 import { selectCompSchema } from '@/components/shared/FormFields/rjsf-utils/common';
 import { JsonParse, randomPatternNameGenerator } from '../../../../utils/utils';
 import Notification from './Notification';
 import {
   useConnectToConnectionMutation,
   useVerifyAndRegisterConnectionMutation,
+  useAddKubernetesConfigMutation,
 } from '@/rtk-query/connection';
 import { useGetCredentialsQuery } from '@/rtk-query/credentials';
+import { useGetComponentsQuery } from '@/rtk-query/meshModel';
+import { useNotification } from '@/utils/hooks/useNotification';
+import { EVENT_TYPES } from 'lib/event-types';
 
-const CONNECTION_TYPES = ['Prometheus Connection', 'Grafana Connection'];
-
-const schema = selectCompSchema(
-  CONNECTION_TYPES,
-  'Select one of the available Connection type',
-  'Select type of Connection to register',
-  'selectedConnectionType',
-);
 export const SelectConnection = ({ setSharedData, handleNext }) => {
   const formRef = useRef();
   const [registerConnection] = useVerifyAndRegisterConnectionMutation();
+  const { data: componentsData } = useGetComponentsQuery({
+    params: { pagesize: 'all' },
+  });
 
-  const handleRegisterConnection = async (componentName) => {
+  // Dynamically build the list of connection types from the MeshModel registry.
+  // Kubernetes is always included as a special case even if the registry doesn't list a KubernetesConnection.
+  const connectionTypes = React.useMemo(() => {
+    const types = (componentsData?.components || [])
+      .filter((c) => c.component.kind.endsWith('Connection') && c.component.kind !== 'Connection')
+      .map((c) => c.component.kind.replace(/Connection$/, ' Connection').trim());
+
+    if (!types.includes('Kubernetes Connection')) {
+      types.push('Kubernetes Connection');
+    }
+    return Array.from(new Set(types)).sort();
+  }, [componentsData]);
+
+  const schema = React.useMemo(
+    () =>
+      selectCompSchema(
+        connectionTypes,
+        'Select one of the available Connection type',
+        'Select type of Connection to register',
+        'selectedConnectionType',
+      ),
+    [connectionTypes],
+  );
+
+  const handleRegisterConnection = async (kindName) => {
+    // Kubernetes uses a kubeconfig file upload — skip the initialize API call
+    // and let the next step (ConnectionDetails) handle the upload directly.
+    if (kindName.toLowerCase() === 'kubernetes') {
+      setSharedData((prevState) => ({
+        ...prevState,
+        kind: 'kubernetes',
+      }));
+      handleNext();
+      return;
+    }
+
     try {
       const payload = {
         body: {
-          kind: componentName,
+          kind: kindName,
           status: 'initialize',
         },
       };
 
       const result = await registerConnection(payload).unwrap();
 
-      let schemaObj = {
-        connection: JsonParse(result?.connection?.schema),
-        credential: JsonParse(result?.credential?.schema),
+      const schemaObj = {
+        connection: JsonParse(result?.connection?.component?.schema ?? result?.connection?.schema),
+        credential: JsonParse(result?.credential?.component?.schema ?? result?.credential?.schema),
       };
 
       setSharedData((prevState) => ({
         ...prevState,
         connection: result,
         schemas: schemaObj,
-        kind: componentName.toLowerCase(),
+        kind: kindName.toLowerCase(),
       }));
 
       handleNext();
@@ -75,12 +110,15 @@ export const SelectConnection = ({ setSharedData, handleNext }) => {
 
   const handleChange = (data) => {
     if (data.selectedConnectionType) {
-      const selectedConnectionType = data.selectedConnectionType;
-      // The selectedConnectionType is the concatentaion of connectionType, ' ' and 'Connection' suffix.
-      // Therefore, when initiating connection we are removing ' ' and suffix so that correct schema is retrieved.
-      handleRegisterConnection(
-        selectedConnectionType?.slice(0, selectedConnectionType.indexOf(' ')),
-      );
+      // Strip the ' Connection' or 'Connection' suffix (with or without space)
+      // to get the clean kind name, then lowercase it for the API.
+      // e.g. 'BigQuery Connection' → 'bigquery'
+      //      'PrometheusConnection' → 'prometheus'
+      let kindName = data.selectedConnectionType.trim();
+      if (kindName.toLowerCase() !== 'connection') {
+        kindName = kindName.replace(/ ?Connection$/i, '').trim();
+      }
+      handleRegisterConnection(kindName);
     }
   };
 
@@ -92,27 +130,46 @@ export const SelectConnection = ({ setSharedData, handleNext }) => {
         liveValidate={false}
         formRef={formRef}
         onChange={handleChange}
+        templates={{ ArrayFieldTemplate: ConnectionWizardArrayFieldTemplate }}
       />
     </StepperContent>
   );
 };
 
-export const ConnectionDetails = ({ sharedData, setSharedData, handleNext }) => {
-  const formRef = React.createRef();
+export const ConnectionDetails = ({ sharedData, setSharedData, handleNext, onClose }) => {
+  const formRef = useRef();
   const [selectedEndpoint, setSelectedEndpoint] = useState(null);
   // stores selected endpoint just before dropdown is closed
   const [prevSelectedEndpoint, setPrevSelectedEndpoint] = useState(null);
+  // Local form state — only committed to sharedData on Next click to avoid
+  // re-rendering the RJSF form (and losing focus) on every keystroke.
+  const [localFormData, setLocalFormData] = useState(sharedData?.componentForm ?? {});
+
+  // --- Kubernetes kubeconfig upload state ---
+  const [k8sFile, setK8sFile] = useState(null);
+  const [k8sFileName, setK8sFileName] = useState('');
+  const [addK8sConfig, { isLoading: isK8sLoading }] = useAddKubernetesConfigMutation();
+  const { notify } = useNotification();
 
   useEffect(() => {
-    ConnectionDetailContent.title = `Connecting to ${sharedData?.kind}`;
-  }, [sharedData?.connection]);
+    // Capitalize kind for display: 'prometheus' → 'Prometheus', 'bigquery' → 'Bigquery'
+    const kindDisplay = sharedData?.kind
+      ? sharedData.kind.charAt(0).toUpperCase() + sharedData.kind.slice(1)
+      : '';
+    ConnectionDetailContent.title = `Connecting to ${kindDisplay}`;
+  }, [sharedData?.kind]);
 
   const handleCallback = () => {
+    // Commit local form data to shared state right before advancing
+    setSharedData((prevState) => ({
+      ...prevState,
+      componentForm: localFormData,
+    }));
     handleNext();
   };
 
   const cancelCallback = () => {
-    sharedData.onClose();
+    onClose();
   };
 
   const handleSelectEndpoint = (e) => {
@@ -136,18 +193,92 @@ export const ConnectionDetails = ({ sharedData, setSharedData, handleNext }) => 
   };
 
   const handleChange = (data) => {
-    setSharedData((prevState) => ({
-      ...prevState,
-      componentForm: data,
-    }));
+    // Update local state only — do NOT call setSharedData here.
+    // Calling setSharedData triggers parent re-renders which cause RJSF
+    // to receive new props and reset the form, losing input focus.
+    setLocalFormData(data);
   };
+
+  // --- Kubernetes upload handlers ---
+  const handleK8sFileChange = (e) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setK8sFile(file);
+      setK8sFileName(file.name);
+    }
+  };
+
+  const handleK8sUpload = async () => {
+    if (!k8sFile) return;
+    const formData = new FormData();
+    formData.append('k8sfile', k8sFile);
+    try {
+      await addK8sConfig({ body: formData }).unwrap();
+      notify({
+        message: 'Kubernetes config uploaded successfully.',
+        event_type: EVENT_TYPES.SUCCESS,
+      });
+      handleNext();
+    } catch (err) {
+      notify({
+        message: `Failed to upload kubeconfig: ${err?.data || err}`,
+        event_type: EVENT_TYPES.ERROR,
+      });
+    }
+  };
+
+  // For Kubernetes: Next is disabled until a file is selected
+  // For others: disabled until the RJSF form has any data
   const isDisabledNextButton =
-    sharedData?.componentForm &&
-    sharedData?.componentForm['name'] !== undefined &&
-    sharedData?.componentForm &&
-    sharedData?.componentForm['url'] !== undefined
-      ? false
-      : true;
+    sharedData?.kind?.toLowerCase() === 'kubernetes'
+      ? !k8sFile
+      : !localFormData || Object.keys(localFormData).length === 0;
+
+  // Kubernetes gets a dedicated kubeconfig upload UI
+  if (sharedData?.kind?.toLowerCase() === 'kubernetes') {
+    return (
+      <StepperContent
+        {...ConnectionDetailContent}
+        handleCallback={handleK8sUpload}
+        disabled={isDisabledNextButton || isK8sLoading}
+        cancelCallback={cancelCallback}
+        btnText={isK8sLoading ? 'Uploading...' : 'Next'}
+      >
+        <Typography variant="body2" style={{ marginBottom: '1rem' }}>
+          Upload your kubeconfig file (commonly found at <code>~/.kube/config</code>)
+        </Typography>
+        <Box
+          style={{
+            border: '1px dashed #00B39F',
+            borderRadius: 8,
+            padding: '1.5rem',
+            textAlign: 'center',
+            cursor: 'pointer',
+          }}
+          onClick={() => document.getElementById('k8sfile-wizard')?.click()}
+        >
+          <input
+            id="k8sfile-wizard"
+            type="file"
+            style={{ display: 'none' }}
+            accept=".yaml,.yml,.json,"
+            onChange={handleK8sFileChange}
+          />
+          {k8sFileName ? (
+            <Typography variant="body2" style={{ color: '#00B39F' }}>
+              ✅ {k8sFileName}
+            </Typography>
+          ) : (
+            <Typography variant="body2" style={{ opacity: 0.6 }}>
+              Click to select kubeconfig file
+            </Typography>
+          )}
+        </Box>
+      </StepperContent>
+    );
+  }
+
+  // All other connection types: render the schema-driven RJSF form
   return (
     <StepperContent
       {...ConnectionDetailContent}
@@ -199,21 +330,34 @@ export const ConnectionDetails = ({ sharedData, setSharedData, handleNext }) => 
           </Select>
         </FormControl>
       )}
-      <p style={{ display: 'flex', justifyContent: 'center' }}>-OR-</p>
-      <p>Enter the {sharedData.kind} service URL</p>
+      {sharedData?.capabilities && (
+        <p style={{ display: 'flex', justifyContent: 'center' }}>-OR-</p>
+      )}
       <RJSFWrapper
         key="register-connection-rjsf-form"
         jsonSchema={sharedData?.schemas?.connection}
+        uiSchema={{
+          spec: {
+            'ui:options': { hideTitle: true },
+          },
+        }}
         liveValidate={true}
         formRef={formRef}
         disabled={selectedEndpoint !== null ? true : false}
         onChange={handleChange}
+        templates={{ ArrayFieldTemplate: ConnectionWizardArrayFieldTemplate }}
       />
     </StepperContent>
   );
 };
 
-export const CredentialDetails = ({ sharedData, handleNext, handleRegistrationComplete }) => {
+export const CredentialDetails = ({
+  sharedData,
+  setSharedData,
+  handleNext,
+  handleRegistrationComplete,
+  onClose,
+}) => {
   const { data: credentialsData } = useGetCredentialsQuery();
   const [verifyAndRegisterConnection] = useVerifyAndRegisterConnectionMutation();
   const [connectToConnection] = useConnectToConnectionMutation();
@@ -223,7 +367,7 @@ export const CredentialDetails = ({ sharedData, handleNext, handleRegistrationCo
   const [skipCredentialVerification, setSkipCredentialVerification] = useState(false);
   const [disableVerify, setDisableVerify] = useState(true);
   const [isSuccess, setIsSuccess] = React.useState(null);
-  const formRef = React.createRef();
+  const formRef = useRef();
 
   useEffect(() => {
     CredentialDetailContent.title = `Credential for ${sharedData?.kind}`;
@@ -319,7 +463,7 @@ export const CredentialDetails = ({ sharedData, handleNext, handleRegistrationCo
   };
 
   const cancelCallback = () => {
-    sharedData.onClose();
+    onClose();
   };
 
   const handleSelectCredential = (e) => {
@@ -348,7 +492,13 @@ export const CredentialDetails = ({ sharedData, handleNext, handleRegistrationCo
     }
   }, [selectedCredential, formState]);
 
-  const existingCredentials = credentialsData?.credentials || [];
+  const allCredentials = credentialsData?.credentials || [];
+  // Only show credentials that match the current connection type
+  const existingCredentials = allCredentials.filter(
+    (c) => c.type?.toLowerCase() === sharedData?.kind?.toLowerCase(),
+  );
+  const hasCredentialSchema =
+    sharedData?.schemas?.credential && Object.keys(sharedData.schemas.credential).length > 0;
 
   return (
     <StepperContent
@@ -358,64 +508,76 @@ export const CredentialDetails = ({ sharedData, handleNext, handleRegistrationCo
       disabled={disableVerify}
       btnText={isSuccess === null || isSuccess === false ? 'Verify Connection' : 'Next'}
     >
-      <Typography variant="body2" style={{ paddingLeft: '16px' }}>
-        Select an existing credential to use for this connection
-      </Typography>
-      <FormControl sx={{ width: '100%' }} size="small">
-        <InputLabel fontSize="20" id="credential-checkbox-label">
-          Select existing credential
-        </InputLabel>
-        <Select
-          labelId="credential-checkbox-label"
-          id="credential-checkbox"
-          onChange={handleSelectCredential}
-          value={selectedCredential?.name}
-          onClose={handleClose}
-          input={<OutlinedInput label="Select existing credential" />}
-          renderValue={() => (
-            <div>{selectedCredential !== null ? selectedCredential.name : ''}</div>
-          )}
-          MenuProps={{
-            anchorOrigin: {
-              vertical: 'bottom',
-              horizontal: 'left',
-            },
-            transformOrigin: {
-              vertical: 'top',
-              horizontal: 'left',
-            },
-            getContentAnchorEl: null,
-            style: {
-              maxHeight: 48 * 4.5 + 8,
-              width: 250,
-              zIndex: 10000,
-            },
-            PaperProps: {
-              style: {
-                zIndex: 10000,
-              },
-            },
-          }}
-        >
-          {existingCredentials &&
-            existingCredentials?.map((credential) => (
-              <MenuItem key={credential.id} value={credential.id} name={credential.name}>
-                <Checkbox checked={selectedCredential?.id === credential.id} />
-                <ListItemText primary={credential.name} />
-              </MenuItem>
-            ))}
-        </Select>
-      </FormControl>
-      <p style={{ display: 'flex', justifyContent: 'center' }}>-OR-</p>
-      <p>Configure a new credential to use for this connection</p>
-      <RJSFWrapper
-        key="register-connection-rjsf-form"
-        jsonSchema={sharedData?.schemas?.credential}
-        liveValidate={true}
-        formRef={formRef}
-        disabled={selectedCredential !== null ? true : false}
-        onChange={handleChange}
-      />
+      {hasCredentialSchema ? (
+        <>
+          <Typography variant="body2" style={{ paddingLeft: '16px' }}>
+            Select an existing credential to use for this connection
+          </Typography>
+          <FormControl sx={{ width: '100%' }} size="small">
+            <InputLabel fontSize="20" id="credential-checkbox-label">
+              Select existing credential
+            </InputLabel>
+            <Select
+              labelId="credential-checkbox-label"
+              id="credential-checkbox"
+              onChange={handleSelectCredential}
+              value={selectedCredential?.name}
+              onClose={handleClose}
+              input={<OutlinedInput label="Select existing credential" />}
+              renderValue={() => (
+                <div>{selectedCredential !== null ? selectedCredential.name : ''}</div>
+              )}
+              MenuProps={{
+                anchorOrigin: {
+                  vertical: 'bottom',
+                  horizontal: 'left',
+                },
+                transformOrigin: {
+                  vertical: 'top',
+                  horizontal: 'left',
+                },
+                getContentAnchorEl: null,
+                style: {
+                  maxHeight: 48 * 4.5 + 8,
+                  width: 250,
+                  zIndex: 10000,
+                },
+                PaperProps: {
+                  style: {
+                    zIndex: 10000,
+                  },
+                },
+              }}
+            >
+              {existingCredentials &&
+                existingCredentials?.map((credential) => (
+                  <MenuItem key={credential.id} value={credential.id} name={credential.name}>
+                    <Checkbox checked={selectedCredential?.id === credential.id} />
+                    <ListItemText primary={credential.name} />
+                  </MenuItem>
+                ))}
+            </Select>
+          </FormControl>
+          <p style={{ display: 'flex', justifyContent: 'center' }}>-OR-</p>
+          <p>Configure a new credential to use for this connection</p>
+          <RJSFWrapper
+            key="register-connection-rjsf-form"
+            jsonSchema={sharedData?.schemas?.credential}
+            liveValidate={true}
+            formRef={formRef}
+            disabled={selectedCredential !== null ? true : false}
+            onChange={handleChange}
+            templates={{ ArrayFieldTemplate: ConnectionWizardArrayFieldTemplate }}
+          />
+        </>
+      ) : (
+        <div style={{ textAlign: 'center', padding: '2rem 0' }}>
+          <p>No credentials are required for this connection type.</p>
+          <p style={{ color: 'gray', fontSize: '0.9rem' }}>
+            Click <b>Verify Connection</b> to finalize and register the connection.
+          </p>
+        </div>
+      )}
       <Box
         style={{
           background: 'rgba(0, 211, 169, 0.05)',
@@ -451,16 +613,56 @@ export const CredentialDetails = ({ sharedData, handleNext, handleRegistrationCo
   );
 };
 
-export const Finish = ({ sharedData }) => {
+export const Finish = ({ sharedData, onClose }) => {
   const cancelCallback = () => {
-    sharedData.onClose();
+    onClose();
   };
+
+  // Capitalize the kind name for display (e.g. 'prometheus' -> 'Prometheus')
+  const kindDisplay = sharedData?.kind
+    ? sharedData.kind.charAt(0).toUpperCase() + sharedData.kind.slice(1)
+    : 'Connection';
 
   return (
     <StepperContent
       {...FinishContent}
+      subtitle={`Congratulations 🎉, you have registered a new ${kindDisplay} connection.`}
       handleCallback={cancelCallback}
       disabled={false}
-    ></StepperContent>
+    >
+      <Box
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '0.5rem',
+          marginTop: '1rem',
+        }}
+      >
+        <Typography
+          variant="body2"
+          style={{
+            color: '#00B39F',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+          }}
+        >
+          ✔️ {kindDisplay} connection registered
+        </Typography>
+        {sharedData?.schemas?.credential && (
+          <Typography
+            variant="body2"
+            style={{
+              color: '#00B39F',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+            }}
+          >
+            ✔️ Credential associated
+          </Typography>
+        )}
+      </Box>
+    </StepperContent>
   );
 };
